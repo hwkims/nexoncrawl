@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive WebGL Image Stretch with Face Detection</title>
+    <style>
+        /* CSS (inline) */
+        body {
+            display: flex;
+            flex-direction: column; /* 컨트롤들을 세로로 배치 */
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+            font-family: sans-serif;
+        }
+
+        #canvas-container {
+          position: relative; /* controls를 canvas 위에 배치하기 위함 */
+
+        }
+
+        canvas {
+            border: 1px solid black;
+            display: block; /* Remove extra space below canvas */
+        }
+
+        #controls {
+            margin-top: 20px; /* 캔버스와 컨트롤 사이 간격 */
+            display: flex;
+            flex-direction: column;
+            gap: 10px; /* 컨트롤 사이의 간격 */
+            position: absolute; /*절대위치 설정*/
+            top: 10px;
+            left: 10px;
+            background-color: rgba(255,255,255,0.8);
+            padding:10px;
+            border-radius: 5px;
+        }
+
+        .control-group {
+          display: flex;
+          align-items: center; /* 수직 정렬 */
+        }
+      .control-group label{
+        margin-right: 5px;
+        width: 90px;
+        text-align: right;
+      }
+        input[type="range"] {
+            width: 150px; /* 슬라이더 너비 조절 */
+        }
+
+        input[type="number"] {
+            width: 60px;  /* 숫자 입력 필드 너비 조절 */
+        }
+        #imageInput {
+            margin-bottom: 10px; /* 이미지 입력 필드 아래쪽 여백 */
+        }
+    </style>
+</head>
+<body>
+    <div id = "canvas-container">
+      <canvas id="myCanvas" width="512" height="512"></canvas>
+
+      <div id="controls">
+          <div class="control-group">
+            <label for="stretchFactor">Stretch Factor:</label>
+            <input type="range" id="stretchFactor" min="0.1" max="3.0" step="0.1" value="1.5">
+            <input type="number" id="stretchFactorValue" value="1.5" min="0.1" max="3.0" step="0.1">
+          </div>
+
+          <div class="control-group">
+            <label for="range">Range:</label>
+            <input type="range" id="range" min="0.01" max="0.5" step="0.01" value="0.2">
+            <input type="number" id="rangeValue" value="0.2" min="0.01" max="0.5" step="0.01">
+          </div>
+          <div class="control-group">
+            <input type="file" id="imageInput" accept="image/*">
+          </div>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <script>
+      // JavaScript
+      const canvas = document.getElementById('myCanvas');
+      const gl = canvas.getContext('webgl');
+
+      if (!gl) {
+        alert('WebGL not supported');
+      }
+
+      // Vertex shader
+      const vertexShaderSource = `
+      attribute vec2 a_position;
+      attribute vec2 a_texCoord;
+      varying vec2 v_texCoord;
+
+      void main() {
+        gl_Position = vec4(a_position, 0.0, 1.0);
+        v_texCoord = a_texCoord;
+      }
+      `;
+
+      // Fragment shader
+      const fragmentShaderSource = `
+      precision mediump float;
+
+      varying vec2 v_texCoord;
+      uniform sampler2D u_image;
+      uniform float u_center;       // 늘리기 중심
+      uniform float u_stretchFactor; // 늘리기 계수
+      uniform float u_range; //늘리기 범위의 반
+
+      void main() {
+        vec2 uv = v_texCoord;
+
+          // 이미지 늘리기
+          if (uv.x > u_center - u_range && uv.x < u_center + u_range) {
+            uv.x = u_center + (uv.x - u_center) * u_stretchFactor;
+          }
+
+        gl_FragColor = texture2D(u_image, uv);
+      }
+      `;
+
+      // 쉐이더 컴파일 함수
+      function compileShader(gl, type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+          console.error('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
+          gl.deleteShader(shader);
+          return null;
+        }
+        return shader;
+      }
+
+      // 쉐이더 프로그램 생성 함수
+      function createProgram(gl, vertexShader, fragmentShader) {
+        const program = gl.createProgram();
+        gl.attachShader(program, vertexShader);
+        gl.attachShader(program, fragmentShader);
+        gl.linkProgram(program);
+
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+          console.error('Unable to initialize the shader program: ' + gl.getProgramInfoLog(program));
+          return null;
+        }
+        return program;
+      }
+      // 쉐이더 컴파일
+      const vertexShader = compileShader(gl, gl.VERTEX_SHADER, vertexShaderSource);
+      const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, fragmentShaderSource);
+
+      // 쉐이더 프로그램 생성
+      const program = createProgram(gl, vertexShader, fragmentShader);
+      gl.useProgram(program); // 프로그램 사용
+
+        // Vertex buffer 생성 (정점 위치)
+      const positionBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+      const positions = [
+          -1.0,  1.0, // top-left
+          1.0,  1.0, // top-right
+          -1.0, -1.0, // bottom-left
+          -1.0, -1.0, // bottom-left
+          1.0,  1.0, // top-right
+          1.0, -1.0, // bottom-right
+      ];
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+
+      // Attribute 위치 가져오기 (정점 위치)
+      const positionAttributeLocation = gl.getAttribLocation(program, "a_position");
+      gl.enableVertexAttribArray(positionAttributeLocation);
+      gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+
+
+      // Texture coordinate buffer 생성 (텍스처 좌표)
+      const texCoordBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
+      const texCoords = [
+        0.0, 0.0, // top-left
+        1.0, 0.0, // top-right
+        0.0, 1.0, // bottom-left
+        0.0, 1.0, // bottom-left
+        1.0, 0.0, // top-right
+        1.0, 1.0, // bottom-right
+      ];
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(texCoords), gl.STATIC_DRAW);
+
+      // Attribute 위치 가져오기 (텍스처 좌표)
+      const texCoordAttributeLocation = gl.getAttribLocation(program, "a_texCoord");
+      gl.enableVertexAttribArray(texCoordAttributeLocation);
+      gl.vertexAttribPointer(texCoordAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+
+      // Uniform 변수 위치 가져오기
+      const centerLocation = gl.getUniformLocation(program, 'u_center');
+      const stretchFactorLocation = gl.getUniformLocation(program, 'u_stretchFactor');
+      const rangeLocation = gl.getUniformLocation(program, 'u_range');
+
+      // 텍스처 생성 및 설정 함수
+      function createTexture(gl, image) {
+        const texture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+
+        // 텍스처 파라미터 설정 (필터링, 래핑)
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+        // 이미지 데이터를 텍스처에 업로드
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+
+        return texture;
+      }
+
+      // 컨트롤 요소 가져오기
+      const stretchFactorSlider = document.getElementById('stretchFactor');
+      const stretchFactorValue = document.getElementById('stretchFactorValue');
+      const rangeSlider = document.getElementById('range');
+      const rangeValue = document.getElementById('rangeValue');
+      const imageInput = document.getElementById('imageInput');
+
+
+      // 늘리기 파라미터 업데이트 함수
+      function updateStretchParameters() {
+          const stretchFactor = parseFloat(stretchFactorSlider.value);
+          const range = parseFloat(rangeSlider.value);
+
+          // 숫자 입력 필드 업데이트
+          stretchFactorValue.value = stretchFactor;
+          rangeValue.value = range;
+
+          // Uniform 변수 업데이트
+          gl.uniform1f(stretchFactorLocation, stretchFactor);
+          gl.uniform1f(rangeLocation, range);
+
+          // 다시 그리기 (필요한 경우)
+          // render(); //requestAnimationFrame 안에서 업데이트 하므로 불필요
+      }
+
+      // 이벤트 리스너 등록 (슬라이더, 숫자 입력 필드)
+      stretchFactorSlider.addEventListener('input', updateStretchParameters);
+      stretchFactorValue.addEventListener('input', () => {
+        stretchFactorSlider.value = stretchFactorValue.value; // 슬라이더 값 동기화
+        updateStretchParameters(); // 파라미터 업데이트
+      });
+
+      rangeSlider.addEventListener('input', updateStretchParameters);
+      rangeValue.addEventListener('input', () => {
+        rangeSlider.value = rangeValue.value;
+        updateStretchParameters();
+      });
+
+        // 이미지 입력 처리
+        imageInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = async (e) => { // async 추가
+                    image.src = e.target.result;
+                    // 텍스처 업데이트를 image.onload 내부에서 처리
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+      let texture; // 텍스처 변수
+      // 이미지 로드
+      const image = new Image();
+      image.crossOrigin = "anonymous"; // CORS
+
+      image.src = 'face.jpg'; // 기본 이미지: face.jpg
+
+
+      // face-api.js 모델 로드 및 초기화
+      Promise.all([
+          faceapi.nets.tinyFaceDetector.loadFromUri('https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights'),
+          faceapi.nets.faceLandmark68Net.loadFromUri('https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights'),
+      ]).then(start);
+
+        async function start() {
+          // face.jpg 로드 및 얼굴 인식
+          image.onload = async () => { // async 추가
+              texture = createTexture(gl, image); // 텍스처 생성
+
+              const detections = await faceapi.detectAllFaces(image, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks();
+
+              if (detections.length > 0) {
+                  const landmarks = detections[0].landmarks;
+                  const noseTip = landmarks.getNose()[3];
+                  const normalizedNoseTipX = noseTip.x / image.width;
+                  gl.uniform1f(centerLocation, normalizedNoseTipX);
+              } else {
+                  gl.uniform1f(centerLocation, 0.5); // 얼굴 미검출 시 중앙
+              }
+               // 파라미터 초기값 설정
+              updateStretchParameters();
+              render(); // 렌더링 시작
+          };
+        }
+
+      // 렌더링 함수
+      function render() {
+          gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+          gl.clearColor(0, 0, 0, 0);
+          gl.clear(gl.COLOR_BUFFER_BIT);
+          gl.useProgram(program);
+
+            // 텍스처 바인딩
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, texture);
+          gl.uniform1i(gl.getUniformLocation(program, "u_image"), 0);
+
+          // Attribute 설정 (이미 위에서 했지만, 명시적으로 한 번 더)
+          gl.enableVertexAttribArray(positionAttributeLocation);
+          gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+          gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+
+          gl.enableVertexAttribArray(texCoordAttributeLocation);
+          gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
+          gl.vertexAttribPointer(texCoordAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+
+          // 그리기
+          gl.drawArrays(gl.TRIANGLES, 0, 6);
+          requestAnimationFrame(render); // 다음 프레임 요청
+
+      }
+
+    </script>
+</body>
+</html>
