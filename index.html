@@ -281,8 +281,8 @@
 
       // face-api.js 모델 로드 및 초기화
       Promise.all([
-          faceapi.nets.tinyFaceDetector.loadFromUri('https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights'),
-          faceapi.nets.faceLandmark68Net.loadFromUri('https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights'),
+          faceapi.nets.tinyFaceDetector.loadFromUri('https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/tiny_face_detector_model-weights_manifest.json'),
+          faceapi.nets.faceLandmark68Net.loadFromUri('https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face_landmark_68_model-weights_manifest.json'),
       ]).then(start);
 
         async function start() {
