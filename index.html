@@ -5,10 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Interactive WebGL Image Stretch with Face Detection</title>
     <style>
-        /* CSS (inline) */
         body {
             display: flex;
-            flex-direction: column; /* 컨트롤들을 세로로 배치 */
+            flex-direction: column;
             align-items: center;
             min-height: 100vh;
             margin: 0;
@@ -17,21 +16,20 @@
         }
 
         #canvas-container {
-          position: relative; /* controls를 canvas 위에 배치하기 위함 */
-
+          position: relative;
         }
 
         canvas {
             border: 1px solid black;
-            display: block; /* Remove extra space below canvas */
+            display: block;
         }
 
         #controls {
-            margin-top: 20px; /* 캔버스와 컨트롤 사이 간격 */
+            margin-top: 20px;
             display: flex;
             flex-direction: column;
-            gap: 10px; /* 컨트롤 사이의 간격 */
-            position: absolute; /*절대위치 설정*/
+            gap: 10px;
+            position: absolute;
             top: 10px;
             left: 10px;
             background-color: rgba(255,255,255,0.8);
@@ -41,7 +39,7 @@
 
         .control-group {
           display: flex;
-          align-items: center; /* 수직 정렬 */
+          align-items: center;
         }
       .control-group label{
         margin-right: 5px;
@@ -49,14 +47,14 @@
         text-align: right;
       }
         input[type="range"] {
-            width: 150px; /* 슬라이더 너비 조절 */
+            width: 150px;
         }
 
         input[type="number"] {
-            width: 60px;  /* 숫자 입력 필드 너비 조절 */
+            width: 60px;
         }
         #imageInput {
-            margin-bottom: 10px; /* 이미지 입력 필드 아래쪽 여백 */
+            margin-bottom: 10px;
         }
     </style>
 </head>
@@ -82,7 +80,7 @@
       </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.11/dist/face-api.min.js"></script>
     <script>
       // JavaScript
       const canvas = document.getElementById('myCanvas');
@@ -240,9 +238,6 @@
           // Uniform 변수 업데이트
           gl.uniform1f(stretchFactorLocation, stretchFactor);
           gl.uniform1f(rangeLocation, range);
-
-          // 다시 그리기 (필요한 경우)
-          // render(); //requestAnimationFrame 안에서 업데이트 하므로 불필요
       }
 
       // 이벤트 리스너 등록 (슬라이더, 숫자 입력 필드)
@@ -258,34 +253,19 @@
         updateStretchParameters();
       });
 
-        // 이미지 입력 처리
-        imageInput.addEventListener('change', (event) => {
-            const file = event.target.files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = async (e) => { // async 추가
-                    image.src = e.target.result;
-                    // 텍스처 업데이트를 image.onload 내부에서 처리
-                };
-                reader.readAsDataURL(file);
-            }
-        });
-
       let texture; // 텍스처 변수
       // 이미지 로드
       const image = new Image();
       image.crossOrigin = "anonymous"; // CORS
 
-      image.src = 'face.jpg'; // 기본 이미지: face.jpg
-
-
       // face-api.js 모델 로드 및 초기화
       Promise.all([
-          faceapi.nets.tinyFaceDetector.loadFromUri('https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/tiny_face_detector_model-weights_manifest.json'),
-          faceapi.nets.faceLandmark68Net.loadFromUri('https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face_landmark_68_model-weights_manifest.json'),
+          faceapi.nets.tinyFaceDetector.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.11/model/tiny-face-detector-model-weights_manifest.json'),
+          faceapi.nets.faceLandmark68Net.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.11/model/face_landmark_68_model-weights_manifest.json'),
       ]).then(start);
 
         async function start() {
+          image.src = 'face.jpg'; // 기본 이미지: face.jpg
           // face.jpg 로드 및 얼굴 인식
           image.onload = async () => { // async 추가
               texture = createTexture(gl, image); // 텍스처 생성
@@ -305,6 +285,31 @@
               render(); // 렌더링 시작
           };
         }
+        // 이미지 입력 처리
+        imageInput.addEventListener('change', async (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    image.src = e.target.result;
+                   image.onload = async () => {
+                        texture = createTexture(gl, image);
+                        const detections = await faceapi.detectAllFaces(image, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks();
+                        if (detections.length > 0) {
+                            const landmarks = detections[0].landmarks;
+                            const noseTip = landmarks.getNose()[3];
+                            const normalizedNoseTipX = noseTip.x / image.width;
+                            gl.uniform1f(centerLocation, normalizedNoseTipX);
+                        } else {
+                            gl.uniform1f(centerLocation, 0.5);
+                        }
+                        updateStretchParameters();
+                        //render(); // No need, as request animation frame will do
+                    }
+                };
+                reader.readAsDataURL(file);
+            }
+        });
 
       // 렌더링 함수
       function render() {
